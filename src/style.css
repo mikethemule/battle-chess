@@ -29,3 +29,135 @@ html, body {
 #ui-overlay > * {
   pointer-events: auto;
 }
+
+/* Main Menu */
+.main-menu {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(135deg, #2d1b4e 0%, #1a1a2e 100%);
+  border: 2px solid #6b4c9a;
+  border-radius: 12px;
+  padding: 40px;
+  min-width: 320px;
+  box-shadow: 0 0 40px rgba(107, 76, 154, 0.3);
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.main-menu h1 {
+  color: #f5e6d3;
+  text-align: center;
+  margin-bottom: 10px;
+  font-size: 28px;
+}
+
+.menu-subtitle {
+  color: #a0a0a0;
+  text-align: center;
+  margin-bottom: 30px;
+  font-size: 14px;
+}
+
+.menu-button {
+  display: block;
+  width: 100%;
+  padding: 15px 20px;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, #4a4063 0%, #2d2540 100%);
+  border: 1px solid #6b4c9a;
+  border-radius: 8px;
+  color: #f5e6d3;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.menu-button:hover {
+  background: linear-gradient(135deg, #6b4c9a 0%, #4a4063 100%);
+  transform: translateY(-2px);
+}
+
+.menu-select, .menu-label {
+  display: block;
+  width: 100%;
+  margin-bottom: 12px;
+  color: #f5e6d3;
+}
+
+.menu-select {
+  padding: 12px;
+  background: #2d2540;
+  border: 1px solid #6b4c9a;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.menu-label {
+  font-size: 14px;
+  color: #a0a0a0;
+  margin-bottom: 6px;
+}
+
+/* HUD */
+.game-hud {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(45, 27, 78, 0.9);
+  border: 1px solid #6b4c9a;
+  border-radius: 8px;
+  padding: 15px;
+  min-width: 180px;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.hud-turn {
+  color: #f5e6d3;
+  font-size: 18px;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.hud-status {
+  color: #ffd700;
+  font-size: 14px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.hud-captured { border-top: 1px solid #4a4063; padding-top: 10px; }
+.hud-captured-title { color: #a0a0a0; font-size: 12px; margin-bottom: 5px; }
+.hud-captured-pieces { color: #f5e6d3; font-size: 18px; letter-spacing: 2px; min-height: 24px; }
+
+.hud-button {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-top: 10px;
+  background: #4a4063;
+  border: 1px solid #6b4c9a;
+  border-radius: 4px;
+  color: #f5e6d3;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hud-button:hover { background: #6b4c9a; }
+
+/* Game Over Modal */
+.game-over-modal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(135deg, #2d1b4e 0%, #1a1a2e 100%);
+  border: 2px solid #ffd700;
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.game-over-modal h2 { color: #ffd700; font-size: 32px; margin-bottom: 20px; }
+.game-over-modal p { color: #f5e6d3; font-size: 18px; margin-bottom: 30px; }
