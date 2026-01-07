@@ -1,5 +1,5 @@
-import { Chess, Move } from 'chess.js';
-import { PieceColor, PieceType, Position, BoardSquare, MoveResult } from './types';
+import { Chess, type Move } from 'chess.js';
+import type { PieceColor, PieceType, Position, BoardSquare, MoveResult } from './types';
 
 /**
  * ChessEngine - A wrapper around chess.js providing a clean API for the Battle Chess game.
