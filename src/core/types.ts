@@ -1,6 +1,11 @@
 export type PieceType = 'k' | 'q' | 'r' | 'b' | 'n' | 'p';
 export type PieceColor = 'w' | 'b';
 
+export interface BoardSquare {
+  type: PieceType;
+  color: PieceColor;
+}
+
 export interface Position {
   file: number; // 0-7 (a-h)
   rank: number; // 0-7 (1-8)
