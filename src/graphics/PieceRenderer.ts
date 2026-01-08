@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BoardSquare, PieceType, PieceColor, Position } from '../core/types';
 import { ChessBoard } from './Board';
 import { AnimationController } from './AnimationController';
@@ -10,7 +10,7 @@ import { AnimationController } from './AnimationController';
  * Data structure for storing piece mesh information
  */
 interface PieceMeshData {
-  mesh: THREE.Mesh;
+  mesh: THREE.Object3D; // Can be Mesh or Group (for GLTF models)
   position: Position;
   type: PieceType;
   color: PieceColor;
@@ -36,7 +36,7 @@ export class PieceRenderer {
 
   // GLB model loading
   private gltfLoader: GLTFLoader = new GLTFLoader();
-  private modelCache: Map<string, GLTF> = new Map();
+  private modelPaths: Set<string> = new Set(); // Track which models exist
   private animationController: AnimationController | null = null;
   private _modelsLoaded: boolean = false;
 
@@ -90,8 +90,8 @@ export class PieceRenderer {
   }
 
   /**
-   * Loads GLB models for all chess pieces
-   * Falls back to procedural geometry if models fail to load
+   * Checks which GLB models exist for chess pieces
+   * Actual loading happens on-demand to avoid skeleton sharing issues
    */
   async loadModels(animationController: AnimationController): Promise<void> {
     this.animationController = animationController;
@@ -99,74 +99,105 @@ export class PieceRenderer {
     const pieces = ['king', 'queen', 'bishop', 'knight', 'rook', 'pawn'];
     const colors = ['white', 'black'];
 
-    const loadPromises: Promise<void>[] = [];
+    const checkPromises: Promise<void>[] = [];
 
     for (const color of colors) {
       for (const piece of pieces) {
         const key = `${color}-${piece}`;
-        const path = `/models/${key}.glb`;
+        const path = `/models/${key}.gltf`;
 
-        loadPromises.push(
-          new Promise((resolve) => {
-            this.gltfLoader.load(
-              path,
-              (gltf) => {
-                this.modelCache.set(key, gltf);
-                resolve();
-              },
-              undefined,
-              () => {
-                console.warn(`Failed to load model ${path}, using fallback`);
-                resolve(); // Don't reject, use procedural fallback
+        // Check if model exists via HEAD request
+        checkPromises.push(
+          fetch(path, { method: 'HEAD' })
+            .then((response) => {
+              if (response.ok) {
+                this.modelPaths.add(key);
               }
-            );
-          })
+            })
+            .catch(() => {
+              // Model doesn't exist, will use procedural fallback
+            })
         );
       }
     }
 
-    await Promise.all(loadPromises);
+    await Promise.all(checkPromises);
     this._modelsLoaded = true;
   }
 
   /**
-   * Creates a piece mesh from a loaded GLTF model
+   * Loads a GLTF model on demand (fresh load, no caching)
+   */
+  private loadModelAsync(path: string): Promise<GLTF> {
+    return new Promise((resolve, reject) => {
+      this.gltfLoader.load(path, resolve, undefined, reject);
+    });
+  }
+
+  /**
+   * Creates a piece mesh from a freshly loaded GLTF model
+   * Model is used directly (no cloning) since each piece loads its own copy
    */
   private createFromGLTF(gltf: GLTF, color: 'white' | 'black'): THREE.Group {
-    const model = gltf.scene.clone();
+    // Use the scene directly - no cloning needed since this is a fresh load
+    const model = gltf.scene;
 
-    // Scale model to fit chess piece dimensions
+    // Update matrix world to ensure accurate bounding box calculation
+    model.updateMatrixWorld(true);
+
+    // Scale model to fit chess piece dimensions (target height ~1 unit)
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     const scale = 1.0 / maxDim;
+
     model.scale.setScalar(scale);
 
-    // Center model
+    // Update matrix world again after scaling
+    model.updateMatrixWorld(true);
+
+    // Recalculate bounding box after scaling
     box.setFromObject(model);
     const center = box.getCenter(new THREE.Vector3());
-    model.position.sub(center);
-    model.position.y = 0;
+
+    // Center model horizontally (x, z) and position bottom at y=0
+    model.position.x = -center.x;
+    model.position.z = -center.z;
+    model.position.y = -box.min.y; // Move up so bottom is at y=0
+
+    // Final matrix update
+    model.updateMatrixWorld(true);
 
     // Register animations if available
     if (gltf.animations.length > 0 && this.animationController) {
       this.animationController.registerModel(model, gltf.animations);
     }
 
-    // Apply fantasy-themed color tinting
+    // Replace all materials with fresh MeshStandardMaterial for proper PBR rendering
+    // glTF files may use unlit materials which cause transparency/rendering issues
     model.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material) {
-        const material = (child.material as THREE.MeshStandardMaterial).clone();
-        if (color === 'white') {
-          // Arcane Order: cyan magical glow
-          material.emissive = new THREE.Color(0x0088ff);
-          material.emissiveIntensity = 0.15;
-        } else {
-          // Necrotic Horde: green necrotic glow
-          material.emissive = new THREE.Color(0x22dd22);
-          material.emissiveIntensity = 0.12;
+      if (child instanceof THREE.Mesh) {
+        // Create a new solid material for each mesh
+        const fantasyMaterial = new THREE.MeshStandardMaterial({
+          color: color === 'white' ? 0xf0f8ff : 0x2f4f4f,
+          roughness: color === 'white' ? 0.3 : 0.6,
+          metalness: color === 'white' ? 0.4 : 0.2,
+          emissive: color === 'white' ? 0x4488ff : 0x44ff44,
+          emissiveIntensity: color === 'white' ? 0.3 : 0.25,
+          transparent: false,
+          opacity: 1.0,
+        });
+
+        // Dispose old material if it exists
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => m.dispose());
+          } else {
+            child.material.dispose();
+          }
         }
-        child.material = material;
+
+        child.material = fantasyMaterial;
         child.castShadow = true;
         child.receiveShadow = true;
       }
@@ -174,13 +205,15 @@ export class PieceRenderer {
 
     const group = new THREE.Group();
     group.add(model);
+
     return group;
   }
 
   /**
    * Creates a piece mesh, using GLB model if available or procedural fallback
+   * Loads model fresh each time to avoid skeleton sharing issues with skinned meshes
    */
-  createPiece(type: PieceType, color: 'white' | 'black'): THREE.Group {
+  async createPiece(type: PieceType, color: 'white' | 'black'): Promise<THREE.Group> {
     // Map PieceType to model name
     const typeToName: Record<PieceType, string> = {
       k: 'king',
@@ -192,10 +225,15 @@ export class PieceRenderer {
     };
 
     const key = `${color}-${typeToName[type]}`;
-    const gltf = this.modelCache.get(key);
 
-    if (gltf) {
-      return this.createFromGLTF(gltf, color);
+    if (this.modelPaths.has(key)) {
+      try {
+        const path = `/models/${key}.gltf`;
+        const gltf = await this.loadModelAsync(path);
+        return this.createFromGLTF(gltf, color);
+      } catch (error) {
+        console.warn(`Failed to load model ${key}, using fallback`);
+      }
     }
 
     // Fallback to procedural geometry
@@ -506,28 +544,32 @@ export class PieceRenderer {
 
   /**
    * Adds a piece to the board at the specified position
+   * Uses GLTF models if loaded, otherwise falls back to procedural geometry
    */
-  public addPiece(type: PieceType, color: PieceColor, position: Position): THREE.Mesh {
-    const geometry = this.getGeometryForPiece(type);
-    const material = color === 'w' ? this.whiteMaterial : this.blackMaterial;
-
-    const mesh = new THREE.Mesh(geometry, material);
+  public async addPiece(type: PieceType, color: PieceColor, position: Position): Promise<THREE.Object3D> {
+    // Use createPiece which checks for GLTF models first
+    const colorStr = color === 'w' ? 'white' : 'black';
+    const pieceGroup = await this.createPiece(type, colorStr);
 
     // Get world position from chess board
     const worldPos = this.chessBoard.getSquarePosition(position.file, position.rank);
-    mesh.position.copy(worldPos);
+    pieceGroup.position.copy(worldPos);
 
     // Black pieces face opposite direction
     if (color === 'b') {
-      mesh.rotation.y = Math.PI;
+      pieceGroup.rotation.y = Math.PI;
     }
 
-    // Enable shadows
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    // Enable shadows on all meshes in the group
+    pieceGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
 
     // Store userData for identification
-    mesh.userData = {
+    pieceGroup.userData = {
       type,
       color,
       position: { ...position },
@@ -543,21 +585,21 @@ export class PieceRenderer {
       n: 'Knight',
       p: 'Pawn',
     };
-    mesh.name = `${color === 'w' ? 'White' : 'Black'}_${pieceNames[type]}_${String.fromCharCode(97 + position.file)}${position.rank + 1}`;
+    pieceGroup.name = `${color === 'w' ? 'White' : 'Black'}_${pieceNames[type]}_${String.fromCharCode(97 + position.file)}${position.rank + 1}`;
 
     // Add to group
-    this.group.add(mesh);
+    this.group.add(pieceGroup);
 
     // Store in pieces map
     const key = this.getPositionKey(position.file, position.rank);
     this.pieces.set(key, {
-      mesh,
+      mesh: pieceGroup,
       position: { ...position },
       type,
       color,
     });
 
-    return mesh;
+    return pieceGroup;
   }
 
   /**
@@ -574,8 +616,19 @@ export class PieceRenderer {
     // Remove from scene
     this.group.remove(pieceData.mesh);
 
-    // Dispose geometry (material is shared, don't dispose)
-    pieceData.mesh.geometry.dispose();
+    // Dispose geometries and materials in all child meshes
+    pieceData.mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => m.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      }
+    });
 
     // Remove from map
     this.pieces.delete(key);
@@ -638,7 +691,19 @@ export class PieceRenderer {
   public clearPieces(): void {
     this.pieces.forEach((pieceData) => {
       this.group.remove(pieceData.mesh);
-      pieceData.mesh.geometry.dispose();
+      // Dispose geometries and materials in all child meshes
+      pieceData.mesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(m => m.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        }
+      });
     });
     this.pieces.clear();
   }
@@ -646,19 +711,25 @@ export class PieceRenderer {
   /**
    * Sets up all pieces from the initial board state
    */
-  public setupInitialPosition(boardState: (BoardSquare | null)[][]): void {
+  public async setupInitialPosition(boardState: (BoardSquare | null)[][]): Promise<void> {
     // Clear any existing pieces
     this.clearPieces();
+
+    // Collect all pieces to add
+    const addPromises: Promise<THREE.Object3D>[] = [];
 
     // Iterate through board state and create pieces
     for (let rank = 0; rank < 8; rank++) {
       for (let file = 0; file < 8; file++) {
         const square = boardState[rank][file];
         if (square) {
-          this.addPiece(square.type, square.color, { file, rank });
+          addPromises.push(this.addPiece(square.type, square.color, { file, rank }));
         }
       }
     }
+
+    // Wait for all pieces to be loaded
+    await Promise.all(addPromises);
   }
 
   /**

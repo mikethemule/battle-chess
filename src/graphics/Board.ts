@@ -36,22 +36,22 @@ export class ChessBoard {
       metalness: 0.15,
     });
 
-    // Dark squares: void rock with subtle magical glow
+    // Dark squares: void rock with subtle glow
     this.darkSquareMaterial = new THREE.MeshStandardMaterial({
       color: 0x1a1a2d,      // Deep void black with blue tint
       roughness: 0.5,
       metalness: 0.25,
-      emissive: 0x220033,   // Subtle purple glow from the void
-      emissiveIntensity: 0.3,
+      emissive: 0x0a0a15,   // Very subtle void glow
+      emissiveIntensity: 0.5,
     });
 
-    // Border: ancient dark stone with gold trim feel
+    // Border: ancient dark stone with faint purple glow
     this.borderMaterial = new THREE.MeshStandardMaterial({
       color: 0x1a1520,      // Near black
       roughness: 0.6,
       metalness: 0.3,
-      emissive: 0x332200,   // Warm gold undertone
-      emissiveIntensity: 0.1,
+      emissive: 0x1a0a20,   // Faint purple/dark glow
+      emissiveIntensity: 0.3,
     });
 
     // Create shared square geometry

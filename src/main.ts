@@ -114,8 +114,8 @@ async function startGame(config: GameConfig): Promise<void> {
   // Reset the chess engine
   chessEngine.reset();
 
-  // Set up pieces
-  pieceRenderer.setupInitialPosition(chessEngine.getBoardState());
+  // Set up pieces (async to allow on-demand model loading)
+  await pieceRenderer.setupInitialPosition(chessEngine.getBoardState());
 
   // Create new game state
   gameState = new GameState(

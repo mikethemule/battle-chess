@@ -241,7 +241,7 @@ export class BattleManager {
    * @param target - Target world position
    */
   private async playMeleeAttack(
-    mesh: THREE.Mesh,
+    object: THREE.Object3D,
     start: THREE.Vector3,
     target: THREE.Vector3
   ): Promise<void> {
@@ -251,10 +251,10 @@ export class BattleManager {
     const lungeTarget = start.clone().addScaledVector(direction, lungeDistance);
     lungeTarget.y = start.y; // Keep same height
 
-    const originalPos = mesh.position.clone();
+    const originalPos = object.position.clone();
 
     // Lunge forward
-    await this.animateObject(mesh, lungeTarget, 150);
+    await this.animateObject(object, lungeTarget, 150);
 
     // Brief hold at strike position
     await this.delay(100);
@@ -268,7 +268,7 @@ export class BattleManager {
     effects.spawnMeleeImpact(this.particlePool, impactPosition);
 
     // Return to original position
-    await this.animateObject(mesh, originalPos, 200);
+    await this.animateObject(object, originalPos, 200);
   }
 
   /**
@@ -279,8 +279,8 @@ export class BattleManager {
     const pieceData = this.pieceRenderer.getPieceAt(position);
     if (!pieceData) return;
 
-    const mesh = pieceData.mesh;
-    const originalScale = mesh.scale.clone();
+    const object = pieceData.mesh;
+    const originalScale = object.scale.clone();
 
     // Get color for death particles
     const deathColor = pieceData.color === 'w' ? 0xf5e6d3 : 0x6b4c9a;
@@ -300,9 +300,17 @@ export class BattleManager {
     const startTime = performance.now();
     let lastTime = startTime;
 
-    // Get material for opacity animation
-    const material = mesh.material as THREE.MeshStandardMaterial;
-    material.transparent = true;
+    // Find first mesh for material opacity animation
+    let foundMaterial: THREE.MeshStandardMaterial | undefined;
+    object.traverse((child) => {
+      if (!foundMaterial && child instanceof THREE.Mesh && child.material) {
+        foundMaterial = child.material as THREE.MeshStandardMaterial;
+      }
+    });
+    const material = foundMaterial;
+    if (material) {
+      material.transparent = true;
+    }
 
     await new Promise<void>((resolve) => {
       const animate = (currentTime: number) => {
@@ -317,21 +325,25 @@ export class BattleManager {
 
         // Scale down
         const scale = 1 - eased * 0.8;
-        mesh.scale.setScalar(scale);
+        object.scale.setScalar(scale);
 
         // Fade out
-        material.opacity = 1 - eased;
+        if (material) {
+          material.opacity = 1 - eased;
+        }
 
         // Slight upward drift
-        mesh.position.y += 0.005;
+        object.position.y += 0.005;
 
         if (progress < 1) {
           requestAnimationFrame(animate);
         } else {
           // Reset material state (piece will be removed anyway)
-          material.opacity = 1;
-          material.transparent = false;
-          mesh.scale.copy(originalScale);
+          if (material) {
+            material.opacity = 1;
+            material.transparent = false;
+          }
+          object.scale.copy(originalScale);
           resolve();
         }
       };

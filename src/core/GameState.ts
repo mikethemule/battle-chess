@@ -368,7 +368,7 @@ export class GameState {
       if (result.promotion && attackerPiece) {
         // Remove the pawn and add the promoted piece
         this.pieceRenderer.removePiece(to);
-        this.pieceRenderer.addPiece(result.promotion, attackerPiece.color, to);
+        await this.pieceRenderer.addPiece(result.promotion, attackerPiece.color, to);
       }
 
       // Emit move event
