@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { Position, PieceType, PieceColor } from '../core/types';
 import { CameraController } from '../graphics/CameraController';
 import { PieceRenderer } from '../graphics/PieceRenderer';
+import { ParticlePool } from './particles/ParticlePool';
+import * as effects from './particles/effects';
 
 /**
  * Particle data structure for managing particle systems
@@ -21,8 +23,9 @@ export class BattleManager {
   private scene: THREE.Scene;
   private cameraController: CameraController;
   private pieceRenderer: PieceRenderer;
+  private particlePool: ParticlePool;
 
-  // Active particle systems
+  // Active particle systems (legacy)
   private particles: ParticleData[] = [];
 
   // Animation state
@@ -39,6 +42,7 @@ export class BattleManager {
     this.scene = scene;
     this.cameraController = cameraController;
     this.pieceRenderer = pieceRenderer;
+    this.particlePool = new ParticlePool(this.scene, 200);
   }
 
   /**
@@ -123,7 +127,8 @@ export class BattleManager {
     if (isMagicUser) {
       // Magic attack: projectile with particle trail
       const magicColor = attackerColor === 'w' ? 0xffd700 : 0x9966ff;
-      await this.playMagicBlast(attackerWorld, defenderWorld, magicColor);
+      const colorName: 'white' | 'black' = attackerColor === 'w' ? 'white' : 'black';
+      await this.playMagicBlast(attackerWorld, defenderWorld, magicColor, colorName);
     } else {
       // Physical attack: melee lunge
       await this.playMeleeAttack(
@@ -139,11 +144,13 @@ export class BattleManager {
    * @param from - Start world position
    * @param to - Target world position
    * @param color - Color of the magic effect
+   * @param attackerColor - 'white' or 'black' for new particle effects
    */
   private async playMagicBlast(
     from: THREE.Vector3,
     to: THREE.Vector3,
-    color: number
+    color: number,
+    attackerColor: 'white' | 'black' = 'white'
   ): Promise<void> {
     // Create glowing sphere projectile
     const projectileGeometry = new THREE.SphereGeometry(0.15, 16, 16);
@@ -171,29 +178,44 @@ export class BattleManager {
     // Animate projectile to target
     const duration = 400;
     const startTime = performance.now();
+    let lastTime = startTime;
     const startPos = projectile.position.clone();
 
-    // Create particle trail
+    // Create particle trail (legacy)
     this.createMagicParticles(from, color);
+
+    // Spawn new pooled magic charge particles
+    effects.spawnMagicCharge(this.particlePool, from, attackerColor);
 
     await new Promise<void>((resolve) => {
       const animate = (currentTime: number) => {
         const elapsed = currentTime - startTime;
+        const deltaTime = (currentTime - lastTime) / 1000;
+        lastTime = currentTime;
         const progress = Math.min(elapsed / duration, 1);
         const eased = this.easeOutQuad(progress);
+
+        // Update particle pool
+        this.particlePool.update(deltaTime);
 
         // Move projectile
         projectile.position.lerpVectors(startPos, targetPos, eased);
 
-        // Create trail particles
+        // Create trail particles (legacy and new)
         if (progress < 0.9 && Math.random() > 0.6) {
           this.createTrailParticle(projectile.position, color);
+          // Spawn new pooled projectile trail particles
+          effects.spawnMagicProjectileTrail(
+            this.particlePool,
+            projectile.position,
+            attackerColor
+          );
         }
 
         if (progress < 1) {
           requestAnimationFrame(animate);
         } else {
-          // Impact burst at target
+          // Impact burst at target (legacy)
           this.createImpactParticles(to, color);
 
           // Remove projectile
@@ -237,8 +259,13 @@ export class BattleManager {
     // Brief hold at strike position
     await this.delay(100);
 
-    // Create impact particles at defender
+    // Create impact particles at defender (legacy)
     this.createImpactParticles(target, 0xffffff);
+
+    // Spawn new pooled melee impact particles
+    const impactPosition = target.clone();
+    impactPosition.y = 0.5;
+    effects.spawnMeleeImpact(this.particlePool, impactPosition);
 
     // Return to original position
     await this.animateObject(mesh, originalPos, 200);
@@ -257,15 +284,21 @@ export class BattleManager {
 
     // Get color for death particles
     const deathColor = pieceData.color === 'w' ? 0xf5e6d3 : 0x6b4c9a;
+    const defenderColorName: 'white' | 'black' =
+      pieceData.color === 'w' ? 'white' : 'black';
 
-    // Create death particles (dissolve effect)
+    // Create death particles (dissolve effect) - legacy
     const board = this.cameraController.getBoard();
     const worldPos = board.getSquarePosition(position.file, position.rank);
     this.createDeathParticles(worldPos, deathColor);
 
+    // Spawn new pooled death dissolve particles
+    effects.spawnDeathDissolve(this.particlePool, worldPos, defenderColorName);
+
     // Animate scale down and fade
     const duration = 400;
     const startTime = performance.now();
+    let lastTime = startTime;
 
     // Get material for opacity animation
     const material = mesh.material as THREE.MeshStandardMaterial;
@@ -274,8 +307,13 @@ export class BattleManager {
     await new Promise<void>((resolve) => {
       const animate = (currentTime: number) => {
         const elapsed = currentTime - startTime;
+        const deltaTime = (currentTime - lastTime) / 1000;
+        lastTime = currentTime;
         const progress = Math.min(elapsed / duration, 1);
         const eased = this.easeOutQuad(progress);
+
+        // Update particle pool
+        this.particlePool.update(deltaTime);
 
         // Scale down
         const scale = 1 - eased * 0.8;
@@ -602,9 +640,21 @@ export class BattleManager {
   }
 
   /**
+   * Set a texture for particles (optional enhancement)
+   * @param texture - The texture to apply to pooled particles
+   */
+  public setParticleTexture(texture: THREE.Texture): void {
+    // Note: ParticlePool currently only supports texture at construction time.
+    // This method stores the texture for potential future use or re-initialization.
+    // For now, log that we received it.
+    console.log('BattleManager: Particle texture set', texture.uuid);
+  }
+
+  /**
    * Dispose of all resources
    */
   public dispose(): void {
     this.cleanupParticles();
+    this.particlePool.dispose();
   }
 }
