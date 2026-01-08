@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TextureManager } from './TextureManager';
 
 /**
  * ChessBoard - Creates and manages the 3D chess board
@@ -195,6 +196,26 @@ export class ChessBoard {
     const squareName = `Square_${String.fromCharCode(97 + file)}${rank + 1}`;
     const square = this.group.getObjectByName(squareName);
     return square instanceof THREE.Mesh ? square : null;
+  }
+
+  /**
+   * Loads and applies PBR textures to the board squares
+   * @param textureManager - The TextureManager instance to use for loading textures
+   */
+  async loadTextures(textureManager: TextureManager): Promise<void> {
+    const { light, dark } = await textureManager.loadBoardTextures();
+
+    // Update light square materials
+    this.lightSquareMaterial.map = light.map;
+    this.lightSquareMaterial.normalMap = light.normalMap;
+    this.lightSquareMaterial.roughnessMap = light.roughnessMap;
+    this.lightSquareMaterial.needsUpdate = true;
+
+    // Update dark square materials
+    this.darkSquareMaterial.map = dark.map;
+    this.darkSquareMaterial.normalMap = dark.normalMap;
+    this.darkSquareMaterial.roughnessMap = dark.roughnessMap;
+    this.darkSquareMaterial.needsUpdate = true;
   }
 
   /**
