@@ -4,6 +4,7 @@ import { ChessBoard } from './graphics/Board';
 import { PieceRenderer } from './graphics/PieceRenderer';
 import { InputController } from './graphics/InputController';
 import { CameraController } from './graphics/CameraController';
+import { TextureManager } from './graphics/TextureManager';
 import { ChessEngine } from './core/ChessEngine';
 import { GameState } from './core/GameState';
 import { BattleManager } from './battle/BattleManager';
@@ -65,6 +66,38 @@ const gameHUD = new GameHUD(uiOverlay);
 
 // Game state will be created when the game starts
 let gameState: GameState | null = null;
+
+/**
+ * Load all game assets (textures, models, etc.)
+ * Assets that fail to load will use fallback defaults
+ */
+async function loadAssets(
+  board: ChessBoard,
+  pieceRenderer: PieceRenderer,
+  scene: GameScene,
+  battleManager: BattleManager
+): Promise<void> {
+  const textureManager = new TextureManager();
+
+  // Load board textures (will fail gracefully if files don't exist)
+  try {
+    await board.loadTextures(textureManager);
+  } catch (e) {
+    console.warn('Board textures not loaded, using default materials');
+  }
+
+  // Load piece models (will use procedural fallback if files don't exist)
+  const animationController = scene.getAnimationController();
+  await pieceRenderer.loadModels(animationController);
+
+  // Load particle texture (optional)
+  try {
+    const particleTexture = await textureManager.loadParticleTexture();
+    battleManager.setParticleTexture(particleTexture);
+  } catch (e) {
+    console.warn('Particle texture not loaded, using default particles');
+  }
+}
 
 /**
  * Start a new game with the given configuration
@@ -175,14 +208,38 @@ async function startGame(config: GameConfig): Promise<void> {
 // Set up menu callback
 mainMenu.setOnStartGame(startGame);
 
-// Show the main menu
-mainMenu.show();
+/**
+ * Initialize the game by loading assets and starting the scene
+ */
+async function initialize(): Promise<void> {
+  // Show loading state
+  const loadingDiv = document.getElementById('loading');
+  if (loadingDiv) {
+    loadingDiv.style.display = 'block';
+  }
 
-// Start the animation loop
-gameScene.start();
+  // Load all game assets
+  await loadAssets(chessBoard, pieceRenderer, gameScene, battleManager);
 
-// Log success message
-console.log('Battle Chess: Fantasy Edition - Initialized');
+  // Hide loading state
+  if (loadingDiv) {
+    loadingDiv.style.display = 'none';
+  }
+
+  // Show the main menu
+  mainMenu.show();
+
+  // Start the animation loop
+  gameScene.start();
+
+  // Log success message
+  console.log('Battle Chess: Fantasy Edition - Initialized');
+}
+
+// Start initialization
+initialize().catch((error) => {
+  console.error('Failed to initialize game:', error);
+});
 
 // Expose to window for debugging
 declare global {
