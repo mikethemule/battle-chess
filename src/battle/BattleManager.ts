@@ -662,9 +662,10 @@ export class BattleManager {
   }
 
   /**
-   * Clean up all active particles
+   * Clean up all active particles (both legacy and pooled)
    */
   private cleanupParticles(): void {
+    // Clean up legacy particles
     if (this.particleAnimationId !== null) {
       cancelAnimationFrame(this.particleAnimationId);
       this.particleAnimationId = null;
@@ -677,6 +678,9 @@ export class BattleManager {
     }
 
     this.particles = [];
+
+    // Clean up pooled particles
+    this.particlePool.clear();
   }
 
   /**

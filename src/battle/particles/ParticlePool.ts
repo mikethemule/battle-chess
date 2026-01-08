@@ -135,6 +135,26 @@ export class ParticlePool {
   }
 
   /**
+   * Clears all active particles immediately
+   */
+  clear(): void {
+    this.particles.forEach((particle) => {
+      if (particle.active) {
+        particle.active = false;
+        particle.mesh.visible = false;
+        particle.life = 0;
+      }
+    });
+  }
+
+  /**
+   * Returns true if there are any active particles
+   */
+  hasActiveParticles(): boolean {
+    return this.particles.some((p) => p.active);
+  }
+
+  /**
    * Sets or updates the particle texture
    * @param texture - The texture to apply to all particles
    */
