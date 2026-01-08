@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { AnimationController } from './AnimationController';
 
 /**
  * GameScene - Main 3D scene manager for Battle Chess
@@ -13,6 +14,7 @@ export class GameScene {
 
   private animationId: number | null = null;
   private isRunning: boolean = false;
+  private animationController: AnimationController;
 
   constructor(canvas: HTMLCanvasElement) {
     // Initialize scene with dark background
@@ -46,6 +48,9 @@ export class GameScene {
 
     // Setup lighting
     this.setupLighting();
+
+    // Initialize animation controller
+    this.animationController = new AnimationController();
 
     // Handle window resize
     window.addEventListener('resize', this.onWindowResize.bind(this));
@@ -109,6 +114,9 @@ export class GameScene {
     // Update controls (required for damping)
     this.controls.update();
 
+    // Update animations
+    this.animationController.update();
+
     // Render the scene
     this.renderer.render(this.scene, this.camera);
   }
@@ -134,6 +142,13 @@ export class GameScene {
   }
 
   /**
+   * Get the animation controller for managing model animations
+   */
+  public getAnimationController(): AnimationController {
+    return this.animationController;
+  }
+
+  /**
    * Add an object to the scene
    */
   public add(object: THREE.Object3D): void {
@@ -153,6 +168,7 @@ export class GameScene {
   public dispose(): void {
     this.stop();
     window.removeEventListener('resize', this.onWindowResize.bind(this));
+    this.animationController.dispose();
     this.controls.dispose();
     this.renderer.dispose();
   }
