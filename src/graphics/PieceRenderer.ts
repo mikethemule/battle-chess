@@ -36,9 +36,21 @@ export class PieceRenderer {
 
   // GLB model loading
   private gltfLoader: GLTFLoader = new GLTFLoader();
+  private textureLoader: THREE.TextureLoader = new THREE.TextureLoader();
   private modelPaths: Set<string> = new Set(); // Track which models exist
+  private textureCache: Map<string, THREE.Texture> = new Map();
   private animationController: AnimationController | null = null;
   private _modelsLoaded: boolean = false;
+
+  // Mapping from piece types to character texture names
+  private pieceToTexture: Record<string, { body: string; weapon?: string }> = {
+    king: { body: 'Warrior_Texture', weapon: 'Warrior_Sword_Texture' },
+    queen: { body: 'Wizard_Texture', weapon: 'Wizard_Staff_Texture' },
+    bishop: { body: 'Cleric_Texture', weapon: 'Cleric_Staff_Texture' },
+    knight: { body: 'Rogue_Texture', weapon: 'Rogue_Dagger_Texture' },
+    rook: { body: 'Ranger_Texture', weapon: 'Ranger_Bow_Texture' },
+    pawn: { body: 'Monk_Texture' },
+  };
 
   /** Returns true if GLB models have finished loading */
   get modelsLoaded(): boolean {
@@ -135,10 +147,42 @@ export class PieceRenderer {
   }
 
   /**
+   * Loads a texture with caching
+   */
+  private async loadTexture(name: string): Promise<THREE.Texture | null> {
+    if (this.textureCache.has(name)) {
+      return this.textureCache.get(name)!;
+    }
+
+    const path = `/textures/pieces/${name}.png`;
+
+    return new Promise((resolve) => {
+      this.textureLoader.load(
+        path,
+        (texture) => {
+          texture.flipY = false; // GLTF models use non-flipped UVs
+          texture.colorSpace = THREE.SRGBColorSpace;
+          this.textureCache.set(name, texture);
+          resolve(texture);
+        },
+        undefined,
+        () => {
+          console.warn(`Failed to load texture: ${path}`);
+          resolve(null);
+        }
+      );
+    });
+  }
+
+  /**
    * Creates a piece mesh from a freshly loaded GLTF model
    * Model is used directly (no cloning) since each piece loads its own copy
    */
-  private createFromGLTF(gltf: GLTF, color: 'white' | 'black'): THREE.Group {
+  private async createFromGLTF(
+    gltf: GLTF,
+    color: 'white' | 'black',
+    pieceType: PieceType
+  ): Promise<THREE.Group> {
     // Use the scene directly - no cloning needed since this is a fresh load
     const model = gltf.scene;
 
@@ -173,17 +217,58 @@ export class PieceRenderer {
       this.animationController.registerModel(model, gltf.animations);
     }
 
-    // Replace all materials with fresh MeshStandardMaterial for proper PBR rendering
-    // glTF files may use unlit materials which cause transparency/rendering issues
+    // Map PieceType to full name for texture lookup
+    const typeToName: Record<PieceType, string> = {
+      k: 'king',
+      q: 'queen',
+      r: 'rook',
+      b: 'bishop',
+      n: 'knight',
+      p: 'pawn',
+    };
+    const pieceName = typeToName[pieceType];
+
+    // Load textures for this piece type
+    const textureInfo = this.pieceToTexture[pieceName];
+    let bodyTexture: THREE.Texture | null = null;
+    let weaponTexture: THREE.Texture | null = null;
+
+    if (textureInfo) {
+      bodyTexture = await this.loadTexture(textureInfo.body);
+      if (textureInfo.weapon) {
+        weaponTexture = await this.loadTexture(textureInfo.weapon);
+      }
+    }
+
+    // Team color tinting - subtle tint to preserve texture detail
+    // White team: slight cool tint, Black team: darker purple tint
+    const teamTint = color === 'white' ? new THREE.Color(1.0, 1.0, 1.0) : new THREE.Color(0.6, 0.5, 0.7);
+    const emissiveColor = color === 'white' ? new THREE.Color(0x2266cc) : new THREE.Color(0x22aa22);
+    const emissiveIntensity = color === 'white' ? 0.08 : 0.06;
+
+    // Apply materials with textures to all meshes
     model.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        // Create a new solid material for each mesh
-        const fantasyMaterial = new THREE.MeshStandardMaterial({
-          color: color === 'white' ? 0xf0f8ff : 0x2f4f4f,
-          roughness: color === 'white' ? 0.3 : 0.6,
-          metalness: color === 'white' ? 0.4 : 0.2,
-          emissive: color === 'white' ? 0x4488ff : 0x44ff44,
-          emissiveIntensity: color === 'white' ? 0.3 : 0.25,
+        // Determine if this mesh is a weapon (usually named with weapon-related terms)
+        const meshName = child.name.toLowerCase();
+        const isWeapon =
+          meshName.includes('weapon') ||
+          meshName.includes('sword') ||
+          meshName.includes('staff') ||
+          meshName.includes('bow') ||
+          meshName.includes('dagger');
+
+        // Choose appropriate texture
+        const texture = isWeapon && weaponTexture ? weaponTexture : bodyTexture;
+
+        // Create textured material
+        const material = new THREE.MeshStandardMaterial({
+          map: texture,
+          color: teamTint, // Tint the texture with team color
+          roughness: color === 'white' ? 0.4 : 0.6,
+          metalness: color === 'white' ? 0.3 : 0.2,
+          emissive: emissiveColor,
+          emissiveIntensity: emissiveIntensity,
           transparent: false,
           opacity: 1.0,
         });
@@ -191,13 +276,13 @@ export class PieceRenderer {
         // Dispose old material if it exists
         if (child.material) {
           if (Array.isArray(child.material)) {
-            child.material.forEach(m => m.dispose());
+            child.material.forEach((m) => m.dispose());
           } else {
             child.material.dispose();
           }
         }
 
-        child.material = fantasyMaterial;
+        child.material = material;
         child.castShadow = true;
         child.receiveShadow = true;
       }
@@ -230,7 +315,7 @@ export class PieceRenderer {
       try {
         const path = `/models/${key}.gltf`;
         const gltf = await this.loadModelAsync(path);
-        return this.createFromGLTF(gltf, color);
+        return await this.createFromGLTF(gltf, color, type);
       } catch (error) {
         console.warn(`Failed to load model ${key}, using fallback`);
       }
