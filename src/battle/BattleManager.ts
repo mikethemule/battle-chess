@@ -128,13 +128,14 @@ export class BattleManager {
       // Magic attack: projectile with particle trail
       const magicColor = attackerColor === 'w' ? 0xffd700 : 0x9966ff;
       const colorName: 'white' | 'black' = attackerColor === 'w' ? 'white' : 'black';
-      await this.playMagicBlast(attackerWorld, defenderWorld, magicColor, colorName);
+      await this.playMagicBlast(attackerWorld, defenderWorld, magicColor, colorName, attackerPos);
     } else {
       // Physical attack: melee lunge
       await this.playMeleeAttack(
         attackerData.mesh,
         attackerWorld,
-        defenderWorld
+        defenderWorld,
+        attackerPos
       );
     }
   }
@@ -145,13 +146,22 @@ export class BattleManager {
    * @param to - Target world position
    * @param color - Color of the magic effect
    * @param attackerColor - 'white' or 'black' for new particle effects
+   * @param attackerPos - Position of the attacker for animation
    */
   private async playMagicBlast(
     from: THREE.Vector3,
     to: THREE.Vector3,
     color: number,
-    attackerColor: 'white' | 'black' = 'white'
+    attackerColor: 'white' | 'black' = 'white',
+    attackerPos?: Position
   ): Promise<void> {
+    // Play magic/attack animation on attacker
+    if (attackerPos) {
+      const hasMagic = this.pieceRenderer.hasPieceAnimation(attackerPos, 'magic');
+      const animToPlay = hasMagic ? 'magic' : 'attack';
+      // Start animation but don't await - let it play during projectile
+      this.pieceRenderer.playPieceAnimation(attackerPos, animToPlay, false);
+    }
     // Create glowing sphere projectile
     const projectileGeometry = new THREE.SphereGeometry(0.15, 16, 16);
     const projectileMaterial = new THREE.MeshBasicMaterial({
@@ -239,11 +249,13 @@ export class BattleManager {
    * @param mesh - The attacker mesh
    * @param start - Start world position
    * @param target - Target world position
+   * @param attackerPos - Position of the attacker for animation
    */
   private async playMeleeAttack(
     object: THREE.Object3D,
     start: THREE.Vector3,
-    target: THREE.Vector3
+    target: THREE.Vector3,
+    attackerPos?: Position
   ): Promise<void> {
     // Calculate lunge direction (toward target, but don't go all the way)
     const direction = new THREE.Vector3().subVectors(target, start).normalize();
@@ -255,6 +267,12 @@ export class BattleManager {
 
     // Lunge forward
     await this.animateObject(object, lungeTarget, 150);
+
+    // Play attack animation at strike position
+    if (attackerPos) {
+      // Start attack animation (don't await - let it play during impact)
+      this.pieceRenderer.playPieceAnimation(attackerPos, 'attack', false);
+    }
 
     // Brief hold at strike position
     await this.delay(100);
@@ -269,6 +287,11 @@ export class BattleManager {
 
     // Return to original position
     await this.animateObject(object, originalPos, 200);
+
+    // Return to idle animation
+    if (attackerPos) {
+      this.pieceRenderer.playPieceAnimation(attackerPos, 'idle', true);
+    }
   }
 
   /**
@@ -294,6 +317,11 @@ export class BattleManager {
 
     // Spawn new pooled death dissolve particles
     effects.spawnDeathDissolve(this.particlePool, worldPos, defenderColorName);
+
+    // Play the death animation from the model (non-blocking)
+    if (this.pieceRenderer.hasPieceAnimation(position, 'death')) {
+      this.pieceRenderer.playPieceAnimation(position, 'death', false);
+    }
 
     // Animate scale down and fade
     const duration = 400;
@@ -656,10 +684,8 @@ export class BattleManager {
    * @param texture - The texture to apply to pooled particles
    */
   public setParticleTexture(texture: THREE.Texture): void {
-    // Note: ParticlePool currently only supports texture at construction time.
-    // This method stores the texture for potential future use or re-initialization.
-    // For now, log that we received it.
-    console.log('BattleManager: Particle texture set', texture.uuid);
+    this.particlePool.setTexture(texture);
+    console.log('BattleManager: Particle texture applied');
   }
 
   /**

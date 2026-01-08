@@ -944,6 +944,52 @@ export class PieceRenderer {
   }
 
   /**
+   * Gets the animation controller for external use (e.g., BattleManager)
+   */
+  public getAnimationController(): AnimationController | null {
+    return this.animationController;
+  }
+
+  /**
+   * Plays an animation on a piece at the given position
+   * @param position - Position of the piece
+   * @param animationName - Name of the animation to play
+   * @param loop - Whether to loop the animation (default: false)
+   * @returns Promise that resolves when animation finishes (or immediately if looping)
+   */
+  public async playPieceAnimation(
+    position: Position,
+    animationName: 'idle' | 'walk' | 'attack' | 'magic' | 'death',
+    loop: boolean = false
+  ): Promise<void> {
+    const pieceData = this.getPieceAt(position);
+    if (!pieceData || !this.animationController) return;
+
+    const innerModel = this.getInnerModel(pieceData.mesh);
+    if (!innerModel) return;
+
+    if (this.animationController.hasAnimation(innerModel, animationName)) {
+      await this.animationController.playAnimation(innerModel, animationName, loop);
+    }
+  }
+
+  /**
+   * Checks if a piece at the given position has a specific animation
+   */
+  public hasPieceAnimation(
+    position: Position,
+    animationName: 'idle' | 'walk' | 'attack' | 'magic' | 'death'
+  ): boolean {
+    const pieceData = this.getPieceAt(position);
+    if (!pieceData || !this.animationController) return false;
+
+    const innerModel = this.getInnerModel(pieceData.mesh);
+    if (!innerModel) return false;
+
+    return this.animationController.hasAnimation(innerModel, animationName);
+  }
+
+  /**
    * Clears all pieces from the board
    */
   public clearPieces(): void {

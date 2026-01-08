@@ -134,6 +134,23 @@ export class ParticlePool {
     });
   }
 
+  /**
+   * Sets or updates the particle texture
+   * @param texture - The texture to apply to all particles
+   */
+  setTexture(texture: THREE.Texture): void {
+    // Update base material
+    this.material.map = texture;
+    this.material.needsUpdate = true;
+
+    // Update all particle materials
+    this.particles.forEach((particle) => {
+      const mat = particle.mesh.material as THREE.MeshBasicMaterial;
+      mat.map = texture;
+      mat.needsUpdate = true;
+    });
+  }
+
   dispose(): void {
     this.particles.forEach((particle) => {
       this.parent.remove(particle.mesh);
