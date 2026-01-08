@@ -1,7 +1,10 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { BoardSquare, PieceType, PieceColor, Position } from '../core/types';
 import { ChessBoard } from './Board';
+import { AnimationController } from './AnimationController';
 
 /**
  * Data structure for storing piece mesh information
@@ -30,6 +33,17 @@ export class PieceRenderer {
 
   // Store pieces by position key "file-rank"
   private pieces: Map<string, PieceMeshData> = new Map();
+
+  // GLB model loading
+  private gltfLoader: GLTFLoader = new GLTFLoader();
+  private modelCache: Map<string, GLTF> = new Map();
+  private animationController: AnimationController | null = null;
+  private _modelsLoaded: boolean = false;
+
+  /** Returns true if GLB models have finished loading */
+  get modelsLoaded(): boolean {
+    return this._modelsLoaded;
+  }
 
   // Piece dimensions
   private pieceHeights: Record<PieceType, number> = {
@@ -73,6 +87,132 @@ export class PieceRenderer {
       emissive: 0x6b4c9a,
       emissiveIntensity: 0.1,
     });
+  }
+
+  /**
+   * Loads GLB models for all chess pieces
+   * Falls back to procedural geometry if models fail to load
+   */
+  async loadModels(animationController: AnimationController): Promise<void> {
+    this.animationController = animationController;
+
+    const pieces = ['king', 'queen', 'bishop', 'knight', 'rook', 'pawn'];
+    const colors = ['white', 'black'];
+
+    const loadPromises: Promise<void>[] = [];
+
+    for (const color of colors) {
+      for (const piece of pieces) {
+        const key = `${color}-${piece}`;
+        const path = `/models/${key}.glb`;
+
+        loadPromises.push(
+          new Promise((resolve) => {
+            this.gltfLoader.load(
+              path,
+              (gltf) => {
+                this.modelCache.set(key, gltf);
+                resolve();
+              },
+              undefined,
+              () => {
+                console.warn(`Failed to load model ${path}, using fallback`);
+                resolve(); // Don't reject, use procedural fallback
+              }
+            );
+          })
+        );
+      }
+    }
+
+    await Promise.all(loadPromises);
+    this._modelsLoaded = true;
+  }
+
+  /**
+   * Creates a piece mesh from a loaded GLTF model
+   */
+  private createFromGLTF(gltf: GLTF, color: 'white' | 'black'): THREE.Group {
+    const model = gltf.scene.clone();
+
+    // Scale model to fit chess piece dimensions
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 1.0 / maxDim;
+    model.scale.setScalar(scale);
+
+    // Center model
+    box.setFromObject(model);
+    const center = box.getCenter(new THREE.Vector3());
+    model.position.sub(center);
+    model.position.y = 0;
+
+    // Register animations if available
+    if (gltf.animations.length > 0 && this.animationController) {
+      this.animationController.registerModel(model, gltf.animations);
+    }
+
+    // Apply color tinting
+    model.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        const material = (child.material as THREE.MeshStandardMaterial).clone();
+        if (color === 'white') {
+          material.emissive = new THREE.Color(0xffd700);
+          material.emissiveIntensity = 0.05;
+        } else {
+          material.emissive = new THREE.Color(0x6b4c9a);
+          material.emissiveIntensity = 0.1;
+        }
+        child.material = material;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    const group = new THREE.Group();
+    group.add(model);
+    return group;
+  }
+
+  /**
+   * Creates a piece mesh, using GLB model if available or procedural fallback
+   */
+  createPiece(type: PieceType, color: 'white' | 'black'): THREE.Group {
+    // Map PieceType to model name
+    const typeToName: Record<PieceType, string> = {
+      k: 'king',
+      q: 'queen',
+      r: 'rook',
+      b: 'bishop',
+      n: 'knight',
+      p: 'pawn',
+    };
+
+    const key = `${color}-${typeToName[type]}`;
+    const gltf = this.modelCache.get(key);
+
+    if (gltf) {
+      return this.createFromGLTF(gltf, color);
+    }
+
+    // Fallback to procedural geometry
+    return this.createProceduralPiece(type, color);
+  }
+
+  /**
+   * Creates a procedural piece mesh (fallback when GLB not available)
+   */
+  private createProceduralPiece(type: PieceType, color: 'white' | 'black'): THREE.Group {
+    const geometry = this.getGeometryForPiece(type);
+    const material = color === 'white' ? this.whiteMaterial : this.blackMaterial;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const group = new THREE.Group();
+    group.add(mesh);
+    return group;
   }
 
   /**
