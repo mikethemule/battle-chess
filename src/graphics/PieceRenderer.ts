@@ -69,23 +69,23 @@ export class PieceRenderer {
     this.group = new THREE.Group();
     this.group.name = 'PieceRenderer';
 
-    // Create materials
-    // White pieces: light cream with gold emissive
+    // Create fantasy-themed materials
+    // Light Army (Arcane Order): polished marble with cyan magical glow
     this.whiteMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf5e6d3,
-      roughness: 0.3,
-      metalness: 0.5,
-      emissive: 0xffd700,
-      emissiveIntensity: 0.05,
+      color: 0xf0f8ff,      // AliceBlue - marble white
+      roughness: 0.2,       // Polished/shiny
+      metalness: 0.6,       // Semi-metallic enchanted look
+      emissive: 0x0088ff,   // Cyan magical energy
+      emissiveIntensity: 0.15,
     });
 
-    // Black pieces: dark purple with purple emissive
+    // Dark Army (Necrotic Horde): ancient obsidian with green necrotic glow
     this.blackMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2d1b4e,
-      roughness: 0.3,
-      metalness: 0.5,
-      emissive: 0x6b4c9a,
-      emissiveIntensity: 0.1,
+      color: 0x2f4f4f,      // DarkSlateGray - obsidian
+      roughness: 0.7,       // Rough stone/bone texture
+      metalness: 0.3,       // Tarnished ancient metal
+      emissive: 0x22dd22,   // Lime green necrotic energy
+      emissiveIntensity: 0.12,
     });
   }
 
@@ -153,16 +153,18 @@ export class PieceRenderer {
       this.animationController.registerModel(model, gltf.animations);
     }
 
-    // Apply color tinting
+    // Apply fantasy-themed color tinting
     model.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
         const material = (child.material as THREE.MeshStandardMaterial).clone();
         if (color === 'white') {
-          material.emissive = new THREE.Color(0xffd700);
-          material.emissiveIntensity = 0.05;
+          // Arcane Order: cyan magical glow
+          material.emissive = new THREE.Color(0x0088ff);
+          material.emissiveIntensity = 0.15;
         } else {
-          material.emissive = new THREE.Color(0x6b4c9a);
-          material.emissiveIntensity = 0.1;
+          // Necrotic Horde: green necrotic glow
+          material.emissive = new THREE.Color(0x22dd22);
+          material.emissiveIntensity = 0.12;
         }
         child.material = material;
         child.castShadow = true;

@@ -28,27 +28,30 @@ export class ChessBoard {
     this.group = new THREE.Group();
     this.group.name = 'ChessBoard';
 
-    // Create materials
-    // Light squares: cream/tan fantasy stone
+    // Create fantasy-themed materials
+    // Light squares: polished stone/marble
     this.lightSquareMaterial = new THREE.MeshStandardMaterial({
-      color: 0xd4c4a8,
-      roughness: 0.6,
-      metalness: 0.1,
+      color: 0xe0e0e0,      // Clean stone white
+      roughness: 0.4,
+      metalness: 0.15,
     });
 
-    // Dark squares: purple/dark fantasy stone with subtle glow
+    // Dark squares: void rock with subtle magical glow
     this.darkSquareMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4a4063,
+      color: 0x1a1a2d,      // Deep void black with blue tint
       roughness: 0.5,
-      metalness: 0.2,
-      emissive: 0x1a1030,
+      metalness: 0.25,
+      emissive: 0x220033,   // Subtle purple glow from the void
+      emissiveIntensity: 0.3,
     });
 
-    // Border: darker purple
+    // Border: ancient dark stone with gold trim feel
     this.borderMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2d2540,
-      roughness: 0.7,
-      metalness: 0.1,
+      color: 0x1a1520,      // Near black
+      roughness: 0.6,
+      metalness: 0.3,
+      emissive: 0x332200,   // Warm gold undertone
+      emissiveIntensity: 0.1,
     });
 
     // Create shared square geometry

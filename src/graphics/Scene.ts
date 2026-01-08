@@ -57,16 +57,17 @@ export class GameScene {
   }
 
   /**
-   * Setup scene lighting with ambient, key, fill, and rim lights
+   * Setup scene lighting with fantasy-themed dramatic lighting
+   * Uses 3-point setup with cool key, warm fill, and purple rim
    */
   private setupLighting(): void {
-    // Ambient light for base illumination
-    const ambientLight = new THREE.AmbientLight(0x404060, 0.4);
+    // Ambient light - subtle base visibility
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
     this.scene.add(ambientLight);
 
-    // Key light (warm directional) - main light source with shadows
-    const keyLight = new THREE.DirectionalLight(0xfff4e6, 1.2);
-    keyLight.position.set(5, 10, 5);
+    // Key light (cool moon/magic light) - main light source with shadows
+    const keyLight = new THREE.DirectionalLight(0xaaccff, 2.0);
+    keyLight.position.set(-10, 20, 5);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 2048;
     keyLight.shadow.mapSize.height = 2048;
@@ -79,15 +80,24 @@ export class GameScene {
     keyLight.shadow.bias = -0.0001;
     this.scene.add(keyLight);
 
-    // Fill light (cool directional) - softens shadows
-    const fillLight = new THREE.DirectionalLight(0x9db4ff, 0.4);
-    fillLight.position.set(-5, 5, -5);
+    // Fill light (warm torch/ground glow) - creates depth
+    const fillLight = new THREE.PointLight(0xffaa00, 0.6, 50);
+    fillLight.position.set(10, 3, 10);
     this.scene.add(fillLight);
 
-    // Rim light - edge highlighting from behind
-    const rimLight = new THREE.DirectionalLight(0xffffff, 0.3);
-    rimLight.position.set(0, 5, -10);
+    // Secondary fill light on opposite side
+    const fillLight2 = new THREE.PointLight(0xff8844, 0.4, 40);
+    fillLight2.position.set(-10, 2, -10);
+    this.scene.add(fillLight2);
+
+    // Rim/back light (purple magical glow) - edge definition for silhouettes
+    const rimLight = new THREE.SpotLight(0x8800ff, 3.0);
+    rimLight.position.set(0, 10, -12);
+    rimLight.target.position.set(0, 0, 0);
+    rimLight.angle = Math.PI / 4;
+    rimLight.penumbra = 0.5;
     this.scene.add(rimLight);
+    this.scene.add(rimLight.target);
   }
 
   /**
