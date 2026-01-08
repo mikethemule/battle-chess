@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { ChessEngine } from './ChessEngine';
 import { PieceRenderer } from '../graphics/PieceRenderer';
 import { InputController } from '../graphics/InputController';
+import { BattleManager } from '../battle/BattleManager';
+import type { ChessAI } from '../ai/StockfishWorker';
 import type { Position, GameConfig, PieceColor, MoveResult } from './types';
 
 /**
@@ -26,6 +28,14 @@ export class GameState {
   private inputController: InputController;
   private boardGroup: THREE.Group;
   private config: GameConfig;
+
+  // Battle manager for capture animations
+  private battleManager: BattleManager | null = null;
+  private isProcessingMove = false;
+
+  // AI opponent
+  private ai: ChessAI | null = null;
+  private aiThinking = false;
 
   // Selection state
   private selectedPosition: Position | null = null;
@@ -75,6 +85,87 @@ export class GameState {
   }
 
   /**
+   * Set the battle manager for capture animations
+   */
+  setBattleManager(battleManager: BattleManager): void {
+    this.battleManager = battleManager;
+  }
+
+  /**
+   * Initialize the AI opponent (for AI mode)
+   * Loads Stockfish or falls back to SimpleAI
+   */
+  async initializeAI(): Promise<void> {
+    if (this.config.mode !== 'ai') return;
+
+    try {
+      // Dynamically import AI to avoid loading when not needed
+      const { createChessAI } = await import('../ai/StockfishWorker');
+      this.ai = await createChessAI();
+
+      // Set difficulty if specified
+      if (this.config.aiDifficulty) {
+        this.ai.setDifficulty(this.config.aiDifficulty);
+      }
+
+      console.log('AI opponent initialized');
+
+      // If AI plays first (player chose black), make AI move
+      if (this.config.playerColor === 'b') {
+        // Small delay so the board is rendered first
+        setTimeout(() => this.makeAIMove(), 500);
+      }
+    } catch (error) {
+      console.error('Failed to initialize AI:', error);
+    }
+  }
+
+  /**
+   * Make the AI opponent's move
+   */
+  private async makeAIMove(): Promise<void> {
+    if (!this.ai || this.isProcessingMove || this.aiThinking) return;
+    if (this.isGameOver()) return;
+
+    // Check if it's the AI's turn
+    const currentPlayer = this.engine.getCurrentPlayer();
+    const isAITurn = this.config.playerColor
+      ? currentPlayer !== this.config.playerColor
+      : currentPlayer === 'b'; // Default: AI plays black
+
+    if (!isAITurn) return;
+
+    this.aiThinking = true;
+
+    try {
+      const fen = this.engine.getFEN();
+      const bestMove = await this.ai.getBestMove(fen);
+
+      // Parse UCI move format (e.g., "e2e4" or "e7e8q" for promotion)
+      const from = bestMove.substring(0, 2);
+      const to = bestMove.substring(2, 4);
+      const promotion = bestMove.length > 4 ? bestMove[4] : undefined;
+
+      const fromPos = this.squareToPosition(from);
+      const toPos = this.squareToPosition(to);
+
+      // Execute the move (this will update the board and emit events)
+      await this.executeMove(fromPos, toPos, promotion as 'q' | 'r' | 'b' | 'n' | undefined);
+    } catch (error) {
+      console.error('AI move error:', error);
+    } finally {
+      this.aiThinking = false;
+    }
+  }
+
+  /**
+   * Check if the AI is currently thinking
+   */
+  isAIThinking(): boolean {
+    return this.aiThinking;
+  }
+
+  /**
    * Emit a game event to all registered callbacks
    */
   private emit(event: GameEvent): void {
@@ -91,6 +182,21 @@ export class GameState {
    * Handle a click on a square or piece
    */
   private handleSquareClick(position: Position): void {
+    // Ignore clicks while processing a move (battle animation)
+    if (this.isProcessingMove) return;
+
+    // Ignore clicks while AI is thinking
+    if (this.aiThinking) return;
+
+    // In AI mode, only allow player to move their own pieces on their turn
+    if (this.config.mode === 'ai') {
+      const currentPlayer = this.engine.getCurrentPlayer();
+      const playerColor = this.config.playerColor || 'w';
+      if (currentPlayer !== playerColor) {
+        return; // Not player's turn
+      }
+    }
+
     const clickedPiece = this.pieceRenderer.getPieceAt(position);
     const currentPlayer = this.engine.getCurrentPlayer();
 
@@ -100,6 +206,7 @@ export class GameState {
 
       // Check if this is a valid move
       if (this.validMoves.includes(targetSquare)) {
+        // Execute move asynchronously (don't await, let it run)
         this.executeMove(this.selectedPosition, position);
         return;
       }
@@ -176,100 +283,147 @@ export class GameState {
 
   /**
    * Execute a move from one position to another
+   * Now async to support battle animations
+   * @param from - Source position
+   * @param to - Destination position
+   * @param promotionOverride - Optional promotion piece (used by AI moves)
    */
-  private executeMove(from: Position, to: Position): void {
-    const fromSquare = this.positionToSquare(from);
-    const toSquare = this.positionToSquare(to);
+  private async executeMove(
+    from: Position,
+    to: Position,
+    promotionOverride?: 'q' | 'r' | 'b' | 'n'
+  ): Promise<void> {
+    if (this.isProcessingMove) return;
+    this.isProcessingMove = true;
 
-    // Check for pawn promotion (reaching the opposite end)
-    const piece = this.pieceRenderer.getPieceAt(from);
-    let promotion: 'q' | undefined;
-    if (piece && piece.type === 'p') {
-      // White pawn reaching rank 8 (index 7) or black pawn reaching rank 1 (index 0)
-      if ((piece.color === 'w' && to.rank === 7) || (piece.color === 'b' && to.rank === 0)) {
-        // Default to queen promotion for now
-        promotion = 'q';
+    try {
+      const fromSquare = this.positionToSquare(from);
+      const toSquare = this.positionToSquare(to);
+
+      // Get piece data before move
+      const attackerPiece = this.pieceRenderer.getPieceAt(from);
+      const capturedPiece = this.pieceRenderer.getPieceAt(to);
+
+      // Check for pawn promotion (reaching the opposite end)
+      let promotion: 'q' | 'r' | 'b' | 'n' | undefined = promotionOverride;
+      if (!promotion && attackerPiece && attackerPiece.type === 'p') {
+        // White pawn reaching rank 8 (index 7) or black pawn reaching rank 1 (index 0)
+        if ((attackerPiece.color === 'w' && to.rank === 7) || (attackerPiece.color === 'b' && to.rank === 0)) {
+          // Default to queen promotion for now
+          promotion = 'q';
+        }
       }
-    }
 
-    // Make the move on the engine
-    const result = this.engine.makeMove(fromSquare, toSquare, promotion);
+      // Make the move on the engine
+      const result = this.engine.makeMove(fromSquare, toSquare, promotion);
 
-    if (!result) {
-      console.error('Invalid move:', fromSquare, '->', toSquare);
+      if (!result) {
+        console.error('Invalid move:', fromSquare, '->', toSquare);
+        this.clearSelection();
+        return;
+      }
+
+      // Clear selection immediately
       this.clearSelection();
-      return;
-    }
 
-    // Handle capture visually (remove the captured piece)
-    if (result.captured) {
-      // The piece at destination will be removed by movePiece
+      // If this is a capture, play battle animation FIRST
+      if (capturedPiece && attackerPiece && this.battleManager) {
+        // Play battle animation
+        await this.battleManager.playBattle(
+          from,
+          to,
+          attackerPiece.type,
+          attackerPiece.color
+        );
+
+        // Remove the captured piece after animation
+        this.pieceRenderer.removePiece(to);
+
+        // Emit capture event
+        this.emit({
+          type: 'capture',
+          data: result,
+          player: attackerPiece.color,
+        });
+      } else if (result.captured && !capturedPiece) {
+        // En passant - captured piece is not at destination
+        // Battle animation for en passant handled separately
+        this.emit({
+          type: 'capture',
+          data: result,
+          player: attackerPiece?.color,
+        });
+      }
+
+      // Handle castling - move the rook too
+      this.handleCastling(from, to, attackerPiece?.color);
+
+      // Handle en passant capture (with battle animation)
+      await this.handleEnPassant(from, to, result, attackerPiece?.color);
+
+      // Move the piece visually
+      this.pieceRenderer.movePiece(from, to);
+
+      // Handle promotion visually
+      if (result.promotion && attackerPiece) {
+        // Remove the pawn and add the promoted piece
+        this.pieceRenderer.removePiece(to);
+        this.pieceRenderer.addPiece(result.promotion, attackerPiece.color, to);
+      }
+
+      // Emit move event
       this.emit({
-        type: 'capture',
+        type: 'move',
         data: result,
-        player: piece?.color,
+        player: attackerPiece?.color,
       });
-    }
 
-    // Handle castling - move the rook too
-    this.handleCastling(from, to, piece?.color);
+      // Check for check
+      if (result.isCheck && !result.isCheckmate) {
+        this.emit({
+          type: 'check',
+          data: result,
+          player: this.engine.getCurrentPlayer(),
+        });
+      }
 
-    // Handle en passant capture
-    this.handleEnPassant(from, to, result, piece?.color);
+      // Check for checkmate
+      if (result.isCheckmate) {
+        this.emit({
+          type: 'checkmate',
+          data: result,
+          player: attackerPiece?.color,
+        });
+        return;
+      }
 
-    // Move the piece visually
-    this.pieceRenderer.movePiece(from, to);
+      // Check for stalemate
+      if (result.isStalemate) {
+        this.emit({
+          type: 'stalemate',
+          data: result,
+        });
+        return;
+      }
 
-    // Handle promotion visually
-    if (result.promotion && piece) {
-      // Remove the pawn and add the promoted piece
-      this.pieceRenderer.removePiece(to);
-      this.pieceRenderer.addPiece(result.promotion, piece.color, to);
-    }
-
-    // Clear selection
-    this.clearSelection();
-
-    // Emit move event
-    this.emit({
-      type: 'move',
-      data: result,
-      player: piece?.color,
-    });
-
-    // Check for check
-    if (result.isCheck && !result.isCheckmate) {
+      // Emit turn change
       this.emit({
-        type: 'check',
-        data: result,
+        type: 'turn',
         player: this.engine.getCurrentPlayer(),
       });
-    }
 
-    // Check for checkmate
-    if (result.isCheckmate) {
-      this.emit({
-        type: 'checkmate',
-        data: result,
-        player: piece?.color,
-      });
-      return;
+      // Trigger AI move if it's AI's turn (in AI mode)
+      if (this.config.mode === 'ai' && this.ai) {
+        const newCurrentPlayer = this.engine.getCurrentPlayer();
+        const playerColor = this.config.playerColor || 'w';
+        if (newCurrentPlayer !== playerColor) {
+          // AI's turn - make move after a small delay for visual feedback
+          setTimeout(() => this.makeAIMove(), 500);
+        }
+      }
+    } finally {
+      this.isProcessingMove = false;
     }
-
-    // Check for stalemate
-    if (result.isStalemate) {
-      this.emit({
-        type: 'stalemate',
-        data: result,
-      });
-      return;
-    }
-
-    // Emit turn change
-    this.emit({
-      type: 'turn',
-      player: this.engine.getCurrentPlayer(),
-    });
   }
 
   /**
@@ -303,14 +457,14 @@ export class GameState {
   }
 
   /**
-   * Handle en passant capture
+   * Handle en passant capture (with battle animation)
    */
-  private handleEnPassant(
+  private async handleEnPassant(
     from: Position,
     to: Position,
     result: MoveResult,
     color?: PieceColor
-  ): void {
+  ): Promise<void> {
     if (!color) return;
 
     // En passant: pawn captures diagonally but destination was empty
@@ -330,6 +484,15 @@ export class GameState {
 
         const capturedPiece = this.pieceRenderer.getPieceAt(capturedPawnPosition);
         if (capturedPiece && capturedPiece.type === 'p') {
+          // Play battle animation for en passant
+          if (this.battleManager) {
+            await this.battleManager.playBattle(
+              from,
+              capturedPawnPosition,
+              'p',
+              color
+            );
+          }
           this.pieceRenderer.removePiece(capturedPawnPosition);
         }
       }
@@ -387,29 +550,59 @@ export class GameState {
    */
   reset(): void {
     this.clearSelection();
+    this.aiThinking = false;
+    this.ai?.stop(); // Stop any ongoing AI calculation
     this.engine.reset();
     this.pieceRenderer.setupInitialPosition(this.engine.getBoardState());
     this.emit({
       type: 'turn',
       player: this.engine.getCurrentPlayer(),
     });
+
+    // If AI plays first (player chose black), trigger AI move
+    if (this.config.mode === 'ai' && this.ai && this.config.playerColor === 'b') {
+      setTimeout(() => this.makeAIMove(), 500);
+    }
   }
 
   /**
    * Undo the last move
+   * In AI mode, undoes both the AI's move and the player's last move
    */
   undo(): boolean {
+    // Don't allow undo while AI is thinking
+    if (this.aiThinking) return false;
+
     this.clearSelection();
-    const success = this.engine.undo();
-    if (success) {
-      // Refresh the visual board state
-      this.pieceRenderer.setupInitialPosition(this.engine.getBoardState());
-      this.emit({
-        type: 'turn',
-        player: this.engine.getCurrentPlayer(),
-      });
+
+    // In AI mode, undo twice (AI move + player move) to get back to player's turn
+    if (this.config.mode === 'ai' && this.ai) {
+      const playerColor = this.config.playerColor || 'w';
+      const currentPlayer = this.engine.getCurrentPlayer();
+
+      // If it's currently player's turn, undo both moves
+      if (currentPlayer === playerColor) {
+        const success1 = this.engine.undo(); // Undo AI move
+        if (success1) {
+          this.engine.undo(); // Undo player move (ignore result, might be first move)
+        }
+      } else {
+        // If it's AI's turn, just undo the last player move
+        this.engine.undo();
+      }
+    } else {
+      // Local mode: just undo one move
+      const success = this.engine.undo();
+      if (!success) return false;
     }
-    return success;
+
+    // Refresh the visual board state
+    this.pieceRenderer.setupInitialPosition(this.engine.getBoardState());
+    this.emit({
+      type: 'turn',
+      player: this.engine.getCurrentPlayer(),
+    });
+    return true;
   }
 
   /**
@@ -417,5 +610,26 @@ export class GameState {
    */
   getConfig(): GameConfig {
     return { ...this.config };
+  }
+
+  /**
+   * Set the AI difficulty level
+   * @param difficulty - The difficulty level to set
+   */
+  setAIDifficulty(difficulty: import('./types').Difficulty): void {
+    this.config.aiDifficulty = difficulty;
+    if (this.ai) {
+      this.ai.setDifficulty(difficulty);
+    }
+  }
+
+  /**
+   * Dispose of resources (call when game is destroyed)
+   */
+  dispose(): void {
+    this.clearSelection();
+    this.ai?.dispose();
+    this.ai = null;
+    this.aiThinking = false;
   }
 }
