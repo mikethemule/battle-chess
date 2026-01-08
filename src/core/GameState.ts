@@ -355,14 +355,14 @@ export class GameState {
         });
       }
 
-      // Handle castling - move the rook too
-      this.handleCastling(from, to, attackerPiece?.color);
+      // Handle castling - move the rook too (with animation)
+      await this.handleCastling(from, to, attackerPiece?.color);
 
       // Handle en passant capture (with battle animation)
       await this.handleEnPassant(from, to, result, attackerPiece?.color);
 
-      // Move the piece visually
-      this.pieceRenderer.movePiece(from, to);
+      // Move the piece visually with walking animation
+      await this.pieceRenderer.animateMovePiece(from, to);
 
       // Handle promotion visually
       if (result.promotion && attackerPiece) {
@@ -427,9 +427,9 @@ export class GameState {
   }
 
   /**
-   * Handle castling rook movement
+   * Handle castling rook movement (with walking animation)
    */
-  private handleCastling(from: Position, to: Position, color?: PieceColor): void {
+  private async handleCastling(from: Position, to: Position, color?: PieceColor): Promise<void> {
     if (!color) return;
 
     // Check if it was castling (king moved 2 squares)
@@ -441,14 +441,14 @@ export class GameState {
       const rank = from.rank;
 
       if (to.file === 6) {
-        // King-side castling: move rook from h to f
-        this.pieceRenderer.movePiece(
+        // King-side castling: move rook from h to f with animation
+        await this.pieceRenderer.animateMovePiece(
           { file: 7, rank },
           { file: 5, rank }
         );
       } else if (to.file === 2) {
-        // Queen-side castling: move rook from a to d
-        this.pieceRenderer.movePiece(
+        // Queen-side castling: move rook from a to d with animation
+        await this.pieceRenderer.animateMovePiece(
           { file: 0, rank },
           { file: 3, rank }
         );

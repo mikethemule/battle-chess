@@ -763,6 +763,179 @@ export class PieceRenderer {
   }
 
   /**
+   * Animates a piece moving from one position to another with walk animation
+   * @param from - Starting position
+   * @param to - Destination position
+   * @param duration - Optional movement duration in ms (default: auto-calculated based on distance)
+   * @returns Promise that resolves when movement is complete
+   */
+  public async animateMovePiece(from: Position, to: Position, duration?: number): Promise<boolean> {
+    const fromKey = this.getPositionKey(from.file, from.rank);
+    const pieceData = this.pieces.get(fromKey);
+
+    if (!pieceData) {
+      return false;
+    }
+
+    // Remove any piece at destination (should be handled by GameState for captures)
+    this.removePiece(to);
+
+    // Get world positions
+    const startPos = this.chessBoard.getSquarePosition(from.file, from.rank);
+    const endPos = this.chessBoard.getSquarePosition(to.file, to.rank);
+
+    // Calculate direction and distance
+    const direction = new THREE.Vector3().subVectors(endPos, startPos);
+    const distance = direction.length();
+    direction.normalize();
+
+    // Calculate duration based on distance (0.4s per square)
+    const moveDuration = duration || Math.max(400, distance * 400);
+
+    // Calculate target rotation to face movement direction
+    const targetAngle = Math.atan2(direction.x, direction.z);
+
+    // Get the inner model for animation (first child of the group is usually the GLTF scene)
+    const innerModel = this.getInnerModel(pieceData.mesh);
+
+    // Start walk animation if available
+    if (innerModel && this.animationController) {
+      // Smoothly rotate to face direction before walking
+      await this.rotateToAngle(pieceData.mesh, targetAngle, 150);
+
+      // Play walk animation
+      if (this.animationController.hasAnimation(innerModel, 'walk')) {
+        this.animationController.playAnimation(innerModel, 'walk', true);
+      }
+    }
+
+    // Animate position
+    await this.animatePosition(pieceData.mesh, startPos, endPos, moveDuration);
+
+    // Stop walk and return to idle
+    if (innerModel && this.animationController) {
+      if (this.animationController.hasAnimation(innerModel, 'idle')) {
+        this.animationController.playAnimation(innerModel, 'idle', true);
+      }
+
+      // Rotate back to default facing (black pieces face opposite)
+      const defaultAngle = pieceData.color === 'b' ? Math.PI : 0;
+      await this.rotateToAngle(pieceData.mesh, defaultAngle, 200);
+    }
+
+    // Update stored data
+    pieceData.position = { ...to };
+    pieceData.mesh.userData.position = { ...to };
+
+    // Update mesh name
+    const pieceNames: Record<PieceType, string> = {
+      k: 'King',
+      q: 'Queen',
+      r: 'Rook',
+      b: 'Bishop',
+      n: 'Knight',
+      p: 'Pawn',
+    };
+    pieceData.mesh.name = `${pieceData.color === 'w' ? 'White' : 'Black'}_${pieceNames[pieceData.type]}_${String.fromCharCode(97 + to.file)}${to.rank + 1}`;
+
+    // Update map
+    this.pieces.delete(fromKey);
+    const toKey = this.getPositionKey(to.file, to.rank);
+    this.pieces.set(toKey, pieceData);
+
+    return true;
+  }
+
+  /**
+   * Gets the inner GLTF model from a piece group for animation purposes
+   */
+  private getInnerModel(pieceGroup: THREE.Object3D): THREE.Object3D | null {
+    // The structure is: Group > GLTF Scene > SkinnedMesh
+    // We need the GLTF Scene which has the animations registered
+    if (pieceGroup.children.length > 0) {
+      return pieceGroup.children[0];
+    }
+    return null;
+  }
+
+  /**
+   * Smoothly rotates a mesh to a target angle
+   */
+  private rotateToAngle(mesh: THREE.Object3D, targetAngle: number, duration: number): Promise<void> {
+    return new Promise((resolve) => {
+      const startAngle = mesh.rotation.y;
+
+      // Normalize angle difference to -PI to PI range
+      let angleDiff = targetAngle - startAngle;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+      // Skip if angle is already correct
+      if (Math.abs(angleDiff) < 0.01) {
+        resolve();
+        return;
+      }
+
+      const startTime = performance.now();
+
+      const animate = () => {
+        const elapsed = performance.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Ease-out for smooth deceleration
+        const eased = 1 - Math.pow(1 - progress, 2);
+
+        mesh.rotation.y = startAngle + angleDiff * eased;
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          mesh.rotation.y = targetAngle;
+          resolve();
+        }
+      };
+
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
+   * Smoothly animates a mesh position from start to end
+   */
+  private animatePosition(
+    mesh: THREE.Object3D,
+    start: THREE.Vector3,
+    end: THREE.Vector3,
+    duration: number
+  ): Promise<void> {
+    return new Promise((resolve) => {
+      const startTime = performance.now();
+
+      const animate = () => {
+        const elapsed = performance.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Ease-in-out for natural movement
+        const eased = progress < 0.5
+          ? 2 * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+        // Interpolate position
+        mesh.position.lerpVectors(start, end, eased);
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          mesh.position.copy(end);
+          resolve();
+        }
+      };
+
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
    * Gets the piece data at a specified position
    */
   public getPieceAt(position: Position): PieceMeshData | null {
